@@ -1,402 +1,459 @@
-# Guía de Arranque — AURE Agente Inteligente
-> Sigue este documento de arriba a abajo. Cada paso tiene un comando para verificar que funcionó.
+# Guía de Despliegue en Producción — AURE Bot
+**Meta: Bot activo en WhatsApp hoy | Costo: $0/mes**
 
 ---
 
-## ¿Qué son Redis y ngrok? (léelo antes de empezar)
+## STACK DE DESPLIEGUE (todo gratis, sin expiración)
 
-### Redis — el "bloc de notas temporal" del servidor
-
-Imagínate que el agente necesita recordar una tarea pendiente:
-*"En 3 horas, enviarle un mensaje de seguimiento a Juan porque miró el Combo Gucci y no compró."*
-
-El problema es que si el servidor se reinicia, esa tarea se perdería de la memoria de Node.js.
-
-**Redis** es una base de datos ultrarrápida que vive separada del servidor. Guarda esas tareas pendientes (jobs) en disco, así si el servidor se cae y vuelve a subir, los trabajos programados siguen ahí y se ejecutan cuando toca.
-
-En términos simples: **Redis = agenda de tareas que no se borra aunque el servidor se reinicie.**
-
-En este proyecto lo usa BullMQ (la librería de colas) para guardar los mensajes de seguimiento de carritos abandonados y los recordatorios post-venta.
+| Componente | Servicio | Por qué |
+|---|---|---|
+| Backend Node.js | **Koyeb** | Siempre activo, nunca duerme, capa gratis permanente |
+| Base de datos PostgreSQL | **Neon** | 500 MB gratis, sin fecha de expiración |
+| Redis (colas) | **Upstash** | 10.000 comandos/día gratis, sin expiración |
+| Frontend dashboard | **Vercel** | Gratis permanente |
 
 ---
 
-### ngrok — el "túnel" entre Meta y tu PC
+## ESTADO ACTUAL
 
-El problema es este: tu servidor corre en `http://localhost:3001` — eso solo existe en tu computador. Meta necesita una URL pública en internet para enviarte los mensajes de WhatsApp e Instagram.
-
-**ngrok** crea un túnel seguro: toma tu `localhost:3001` y lo expone en una URL pública real tipo `https://abc123.ngrok-free.app`. Meta puede pegarle a esa URL, el mensaje viaja por el túnel y llega a tu servidor local.
-
-```
-WhatsApp de un cliente
-        │
-        ▼
-Meta Cloud API (internet)
-        │  envía POST a:
-        ▼
-https://abc123.ngrok-free.app/webhook   ← URL pública de ngrok
-        │
-        │  túnel seguro
-        ▼
-http://localhost:3001/webhook           ← tu servidor en tu PC
-        │
-        ▼
-Respuesta de Aure IA → cliente
-```
-
-En términos simples: **ngrok = puerta trasera temporal que le abre internet a tu servidor local.**
-
-> **Importante:** ngrok gratis cambia la URL cada vez que lo reinicias. Cuando eso pase, debes actualizar la URL en Meta Developer Console. En producción usarás un servidor real con URL fija y ngrok ya no será necesario.
+| Fase | Estado |
+|---|---|
+| ✅ Código en GitHub | Listo |
+| ⬜ PostgreSQL en Neon | Pendiente |
+| ⬜ Redis en Upstash | Pendiente |
+| ⬜ Backend en Koyeb | Pendiente |
+| ⬜ WhatsApp API en Meta | Pendiente |
+| ⬜ OpenAI API Key | Pendiente |
+| ⬜ Frontend en Vercel | Pendiente |
+| ⬜ Prueba final | Pendiente |
 
 ---
 
-## PARTE 1 — Instalar las herramientas en tu PC
+## FASE 2 — Infraestructura gratuita (20 min)
 
-### Paso 1.1 — Verificar si ya tienes Node.js
+### Paso 2.1 — PostgreSQL en Neon
 
-Abre PowerShell o CMD y ejecuta:
+1. Ve a **https://neon.tech**
+2. Click en **"Sign up"** → **"Continue with GitHub"**
+3. En el dashboard, click en **"Create a project"**
+4. Rellena:
+   - **Project name:** `aure`
+   - **Postgres version:** `16`
+   - **Region:** `AWS US East (N. Virginia)`
+5. Click en **"Create project"**
+6. Neon crea la base de datos en segundos y te muestra la pantalla de conexión
+7. En esa pantalla, en la sección **"Connection string"**, asegúrate de que el desplegable diga **"Node.js"**
+8. Copia la cadena de conexión — se ve así:
+   ```
+   postgresql://neondb_owner:AbCxxx@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+   ```
+9. Guárdala — la necesitas en el Paso 2.3
 
-```powershell
-node -v
-npm -v
-```
+### Paso 2.2 — Redis en Upstash
 
-Si ves números (ej: `v20.11.0` y `10.2.4`), ya lo tienes. Si no:
+1. Ve a **https://upstash.com**
+2. Click en **"Sign Up"** → **"Continue with GitHub"**
+3. En el dashboard, click en **"Create Database"**
+4. Rellena:
+   - **Name:** `aure-redis`
+   - **Type:** `Regional`
+   - **Region:** `US-East-1`
+   - **Plan:** `Free`
+5. Click en **"Create"**
+6. Una vez creado, click en `aure-redis` para abrirlo
+7. En la sección **"Database Details"**, anota estos tres valores:
 
-**Instalar Node.js:**
-1. Ir a https://nodejs.org
-2. Descargar el instalador LTS (el botón verde grande)
-3. Ejecutar el instalador → siguiente, siguiente, instalar
-4. Cerrar y volver a abrir PowerShell
-5. Verificar con `node -v`
+   | Dato en Upstash | Variable que necesitas |
+   |---|---|
+   | **Endpoint** | `REDIS_HOST` (ej. `loyal-ocelot-12345.upstash.io`) |
+   | **Port** | `REDIS_PORT` (normalmente `6379`) |
+   | **Password** | `REDIS_PASSWORD` (cadena larga de letras y números) |
 
----
+### Paso 2.3 — Backend en Koyeb
 
-### Paso 1.2 — Instalar PostgreSQL
+#### Crear cuenta
 
-```powershell
-node -v   # solo para verificar que estás en PowerShell correcto
-```
+1. Ve a **https://www.koyeb.com**
+2. Click en **"Sign up"** → **"Continue with GitHub"**
+3. Completa el registro (pide nombre y país — no requiere tarjeta)
 
-**Instalar PostgreSQL:**
-1. Ir a https://www.postgresql.org/download/windows/
-2. Descargar el instalador de EDB (el link que dice "Download the installer")
-3. Ejecutar → durante la instalación:
-   - Deja el puerto en **5432** (por defecto)
-   - Escoge una contraseña para el usuario `postgres` → **anótala**, la vas a necesitar
-   - Deja marcado el componente "pgAdmin 4" (es la interfaz visual)
-4. Terminar la instalación
+#### Crear la App
 
-**Verificar:**
-```powershell
-psql --version
-# Debe responder: psql (PostgreSQL) 16.x o similar
-```
+1. En el dashboard de Koyeb, click en **"Create App"**
+2. Selecciona **"GitHub"** como fuente
+3. Click en **"Install the Koyeb GitHub app"** si es la primera vez → autoriza el repositorio `aure-bot`
+4. Selecciona el repositorio **`aure-bot`**
+5. **Branch:** `main`
 
-Si `psql` no se reconoce, agrégalo al PATH:
-- Busca en tu PC la carpeta `C:\Program Files\PostgreSQL\16\bin`
-- Agrega esa ruta a las variables de entorno de Windows (Variables del sistema → PATH → Editar → Nuevo)
-- Cierra y vuelve a abrir PowerShell
+#### Configurar el servicio
 
----
+Rellena la sección **"Builder"**:
+- **Build and run from source code:** activado
+- **Root directory:** `backend` ← escríbelo exactamente así
+- **Build command:** `npm install`
+- **Run command:** `npm start`
 
-### Paso 1.3 — Instalar Redis en Windows
+Rellena la sección **"Exposing your service"**:
+- **Port:** `3001`
+- **Protocol:** `HTTP`
 
-Redis no tiene instalador oficial para Windows, pero hay una versión de la comunidad que funciona perfectamente para desarrollo:
+#### Agregar variables de entorno
 
-1. Ir a: https://github.com/tporadowski/redis/releases
-2. Descargar el archivo `.msi` más reciente (ej: `Redis-x64-5.0.14.1.msi`)
-3. Ejecutar el instalador → siguiente, siguiente, instalar
-4. Durante la instalación marca la opción **"Add the Redis installation folder to the PATH"**
-5. También marca **"Start the Redis service"** para que arranque automáticamente con Windows
+Baja hasta la sección **"Environment variables"** y agrega cada una con **"Add variable"**:
 
-**Verificar:**
-```powershell
-redis-cli ping
-# Debe responder: PONG
-```
+| Key | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `PORT` | `3001` |
+| `DATABASE_URL` | *(pega la cadena de conexión de Neon del Paso 2.1)* |
+| `META_VERIFY_TOKEN` | `aure_webhook_secreto_2024` |
+| `META_ACCESS_TOKEN` | `pendiente` *(actualizas en Fase 3)* |
+| `WHATSAPP_PHONE_NUMBER_ID` | `pendiente` *(actualizas en Fase 3)* |
+| `OPENAI_API_KEY` | `pendiente` *(actualizas en Fase 4)* |
+| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `REDIS_HOST` | *(Endpoint de Upstash del Paso 2.2)* |
+| `REDIS_PORT` | `6379` |
+| `REDIS_PASSWORD` | *(Password de Upstash del Paso 2.2)* |
 
-Si responde `PONG`, Redis está corriendo y listo. No necesitas hacer nada más con él — corre en segundo plano como un servicio de Windows.
+#### Nombre y plan
 
----
+- **App name:** `aure-backend`
+- **Region:** `Washington, D.C. (AWS us-east-1)`
+- **Instance type:** `Free` ← asegúrate que esté seleccionado
 
-### Paso 1.4 — Instalar ngrok
+Click en **"Deploy"**
 
-1. Ir a https://ngrok.com y crear una cuenta gratuita (con tu email)
-2. Una vez dentro del dashboard de ngrok, ir a la sección **"Your Authtoken"**
-3. Copiar el token que aparece ahí (lo necesitas en el Paso 1.4.3)
+#### Esperar el primer deploy
 
-**Instalar ngrok:**
-```powershell
-winget install ngrok.ngrok
-```
-
-Si `winget` no funciona, descarga el `.exe` directo desde https://ngrok.com/download y ponlo en una carpeta que esté en el PATH.
-
-**Configurar tu token (solo se hace una vez):**
-```powershell
-ngrok config add-authtoken TU_TOKEN_AQUI
-```
-
-**Verificar:**
-```powershell
-ngrok version
-# Debe responder: ngrok version 3.x.x
-```
-
----
-
-## PARTE 2 — Crear cuentas y obtener credenciales
-
-### Paso 2.1 — Cuenta de Meta Developer
-
-1. Ir a https://developers.facebook.com
-2. Iniciar sesión con tu cuenta de Facebook
-3. Click en **"Mis apps"** → **"Crear app"**
-4. Tipo de app: **"Business"** → Siguiente
-5. Nombre de la app: `AURE Joyería Bot` → Crear app
-
-#### Activar WhatsApp Business API:
-1. Dentro de tu app → Dashboard → busca **"WhatsApp"** → click en **"Configurar"**
-2. Vas a ver un número de teléfono de prueba gratuito (tipo `+1 555 XXX XXXX`)
-3. Ese número ya puede enviar y recibir mensajes sin costo
-4. Anota el **Phone Number ID** (es un número largo como `123456789012345`)
-5. Ve a **"Configuración"** → **"Acceso a la API"**
-6. Verás un **"Token de acceso temporal"** → cópialo (empieza con `EAA...`)
-   > Este token dura 24 horas. Para producción generarás uno permanente.
-
-#### Activar Instagram:
-1. En el mismo dashboard de tu app → busca **"Instagram"** → **"Configurar"**
-2. Conecta tu cuenta de Instagram de AURE Joyería
-3. Anota el **Page ID** de la página de Facebook vinculada a Instagram
-
----
-
-### Paso 2.2 — API Key de OpenAI
-
-1. Ir a https://platform.openai.com
-2. Crear cuenta o iniciar sesión
-3. Ir a **"API Keys"** → **"Create new secret key"**
-4. Copiar la key (empieza con `sk-...`) → **guárdala ahora**, no la podrás ver de nuevo
-5. Ir a **"Billing"** → agregar tarjeta → cargar mínimo **$5 USD**
-   > Con $5 tienes para miles de conversaciones con GPT-4o-mini
-
----
-
-## PARTE 3 — Configurar y arrancar el proyecto
-
-### Paso 3.1 — Crear la base de datos
-
-```powershell
-# Conectarte a PostgreSQL como administrador
-psql -U postgres
-# Escribe tu contraseña cuando la pida
-
-# Dentro de psql, crear la base de datos:
-CREATE DATABASE aure_db;
-
-# Verificar que se creó:
-\l
-# Debes ver aure_db en la lista
-
-# Salir
-\q
-```
-
----
-
-### Paso 3.2 — Configurar el archivo .env del backend
-
-Navega a la carpeta del backend:
-
-```powershell
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\backend"
-copy .env.example .env
-```
-
-Abre el archivo `.env` con el Bloc de notas o VS Code y completa cada variable:
-
-```env
-# ── Servidor ──────────────────────────────────────────────
-PORT=3001
-NODE_ENV=development
-FRONTEND_URL=http://localhost:5173
-
-# ── PostgreSQL ─────────────────────────────────────────────
-DATABASE_URL=postgresql://postgres:TU_CONTRASEÑA_DE_POSTGRES@localhost:5432/aure_db
-# Ejemplo real: postgresql://postgres:mipassword123@localhost:5432/aure_db
-
-# ── Meta / WhatsApp ────────────────────────────────────────
-META_VERIFY_TOKEN=aure_webhook_secreto_2024
-# ^ Este lo inventas tú. Puede ser cualquier texto sin espacios.
-# Lo usarás también en Meta Developer Console en el Paso 3.6.
-
-META_ACCESS_TOKEN=EAAxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# ^ El token que copiaste del dashboard de Meta (el que empieza con EAA)
-
-WHATSAPP_PHONE_NUMBER_ID=123456789012345
-# ^ El Phone Number ID del número de prueba de WhatsApp
-
-INSTAGRAM_PAGE_ID=123456789012345
-# ^ El Page ID de tu página de Facebook vinculada a Instagram
-
-# ── OpenAI ─────────────────────────────────────────────────
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# ^ La API key que copiaste de platform.openai.com
-
-OPENAI_MODEL=gpt-4o-mini
-# ^ Deja este modelo para el MVP. Es el más barato y funciona muy bien.
-
-# ── Redis (BullMQ) ─────────────────────────────────────────
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-# ^ Redis local no tiene contraseña. Deja ese campo vacío.
-```
-
-**Guarda el archivo.**
-
----
-
-### Paso 3.3 — Instalar dependencias y arrancar el backend
-
-```powershell
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\backend"
-npm install
-npm run dev
-```
-
-Debes ver estos mensajes en la consola:
+Koyeb muestra los logs en tiempo real. El primer deploy tarda 3-5 minutos (instala dependencias). Espera hasta ver:
 
 ```
 [DB] Conexión exitosa a PostgreSQL
 [Server] Corriendo en http://localhost:3001
 ```
 
-Si ves un error de base de datos, verifica que la contraseña en `DATABASE_URL` sea la correcta.
+Si los logs se detienen en un error, ve a la sección de [Solución de problemas](#solución-de-problemas).
+
+### Paso 2.4 — Obtener tu URL pública de Koyeb
+
+1. Una vez deployado con éxito, en el dashboard de tu app `aure-backend`
+2. Verás la URL pública en la parte superior, se ve así:
+   ```
+   https://aure-backend-tuusuario.koyeb.app
+   ```
+3. Guarda esta URL — la usarás en Meta (Fase 3) y Vercel (Fase 5)
+
+### Paso 2.5 — Verificar que el backend funciona
+
+Abre en el navegador:
+```
+https://aure-backend-tuusuario.koyeb.app/health
+```
+
+Respuesta esperada:
+```json
+{"status":"ok","timestamp":"2026-11-10T..."}
+```
+
+Si ves esto, el backend está vivo. ✅ Continúa con la Fase 3.
 
 ---
 
-### Paso 3.4 — Cargar los productos de prueba
+## FASE 3 — WhatsApp Business API en Meta (30 min)
 
-**Abre una segunda terminal** (sin cerrar la del servidor) y ejecuta:
+### Paso 3.1 — Acceder a Meta Business Suite
 
-```powershell
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\backend"
-npm run seed
-```
+1. Ve a **https://business.facebook.com**
+2. Inicia sesión con tu cuenta de Facebook personal
+3. Si no tienes cuenta de negocio, click en **"Crear cuenta"**:
+   - Nombre: `Aure Joyería`
+   - Correo: `infinityescorcia@gmail.com`
 
-Debes ver:
-```
-[Seeder] 8 productos insertados/verificados.
-```
+### Paso 3.2 — Crear App en Meta for Developers
 
----
+1. Ve a **https://developers.facebook.com**
+2. Arriba a la derecha: **"Mis Apps"** → **"Crear app"**
+3. Tipo de app: selecciona **"Business"** → **"Siguiente"**
+4. Rellena:
+   - **Nombre:** `AURE Bot`
+   - **Correo:** `infinityescorcia@gmail.com`
+   - **Cuenta Business:** selecciona `Aure Joyería`
+5. Click en **"Crear app"**
 
-### Paso 3.5 — Arrancar el frontend
+### Paso 3.3 — Agregar WhatsApp
 
-**Abre una tercera terminal:**
+1. En el dashboard de tu app, en el panel de productos disponibles busca **"WhatsApp"**
+2. Click en **"Configurar"** en esa tarjeta
+3. Click en **"Empezar"** → acepta los términos de servicio
+4. En **"Seleccionar o crear cuenta de WhatsApp Business"**:
+   - Click en **"Crear nueva cuenta de WhatsApp Business"**
+   - Nombre: `Aure Joyería`
+   - Zona horaria: `America/Bogota`
+5. Click en **"Continuar"**
 
-```powershell
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\frontend"
-copy .env.example .env
-npm install
-npm run dev
-```
+### Paso 3.4 — Elegir número para el bot
 
-Abre tu navegador en **http://localhost:5173** — debes ver el panel de control de AURE.
-
----
-
-### Paso 3.6 — Exponer el servidor con ngrok
-
-**Abre una cuarta terminal:**
-
-```powershell
-ngrok http 3001
-```
-
-Verás algo como esto:
-
-```
-Session Status    online
-Account           tu@email.com
-Forwarding        https://abc123.ngrok-free.app -> http://localhost:3001
-```
-
-Copia esa URL (`https://abc123.ngrok-free.app`). La necesitas en el siguiente paso.
-
-> Deja esta terminal abierta siempre que estés probando. Si la cierras, el túnel se corta.
+Tienes dos caminos. Escoge el que aplique a tu situación:
 
 ---
 
-### Paso 3.7 — Registrar el webhook en Meta Developer Console
+**CAMINO A — Usar el número de prueba de Meta (para testear hoy sin riesgos)**
 
-#### Para WhatsApp:
-1. Ir a tu app en developers.facebook.com
-2. Menú izquierdo → **WhatsApp** → **Configuración**
-3. En la sección **"Webhooks"** → click en **"Editar"**
-4. **Callback URL:** `https://abc123.ngrok-free.app/webhook`
-   (la URL de ngrok que copiaste + `/webhook`)
-5. **Verify token:** `aure_webhook_secreto_2024`
-   (el mismo texto que pusiste en `META_VERIFY_TOKEN` en tu `.env`)
+Meta te da un número de sandbox gratis para probar.
+
+1. En **WhatsApp** → **"Configuración de la API"**
+2. Verás el número de prueba ya configurado (ej. `+1 555-XXX-XXXX`)
+3. En la sección **"Enviar y recibir mensajes"** → **"Para"**, agrega tu número personal:
+   - Click en **"Agregar número de teléfono"**
+   - Escribe tu número personal con código de país: `+57XXXXXXXXXX`
+   - Verifica con el código que te llega por WhatsApp
+4. Con esto puedes enviarte mensajes de prueba desde Meta directamente
+5. Para que el bot responda a tu número de prueba, el webhook debe estar configurado (Paso 3.7)
+
+---
+
+**CAMINO B — Agregar tu número real de Aure**
+
+Solo si el número **NO tiene WhatsApp Business App instalada actualmente** (o ya la desinstalaste).
+
+1. En **WhatsApp** → **"Configuración de la API"**
+2. Click en **"Agregar número de teléfono"**
+3. **Nombre de perfil:** `Aure Joyería`
+4. **Zona horaria:** `America/Bogota`
+5. **Categoría:** `Shopping and retail`
+6. Click en **"Siguiente"**
+7. Ingresa tu número: `+57XXXXXXXXXX`
+8. Elige verificación por SMS o llamada → ingresa el código
+9. Click en **"Finalizar"**
+
+---
+
+### Paso 3.5 — Obtener Phone Number ID
+
+1. En **WhatsApp** → **"Configuración de la API"**
+2. En el selector de número (arriba), selecciona tu número (o el de prueba)
+3. Anota el **Phone Number ID** — número de ~15 dígitos que aparece debajo
+
+4. Ve a Koyeb → tu app `aure-backend` → pestaña **"Settings"** → **"Environment variables"**
+5. Actualiza: `WHATSAPP_PHONE_NUMBER_ID` = *(el número que anotaste)*
+
+### Paso 3.6 — Generar Token Permanente
+
+El token del dashboard dura 24 horas. Para producción necesitas uno que nunca expire.
+
+**Crear Usuario del Sistema:**
+
+1. Ve a **https://business.facebook.com/settings**
+2. Menú izquierdo → **"Usuarios"** → **"Usuarios del sistema"**
+3. Click en **"Agregar"**
+   - Nombre: `aure-bot`
+   - Rol: **Administrador**
+4. Click en **"Crear usuario del sistema"**
+
+**Dar acceso al App:**
+
+1. Con `aure-bot` seleccionado → click en **"Asignar activos"**
+2. Panel izquierdo → **"Apps"**
+3. Selecciona **"AURE Bot"**
+4. Activa **"Control total"**
+5. Click en **"Guardar cambios"**
+
+**Generar el Token:**
+
+1. Con `aure-bot` seleccionado → click en **"Generar token nuevo"**
+2. Selecciona la app **"AURE Bot"**
+3. **Expiración:** `Nunca`
+4. Activa estos permisos:
+   - `whatsapp_business_messaging` ✅
+   - `whatsapp_business_management` ✅
+   - `pages_messaging` ✅
+   - `instagram_basic` ✅
+   - `instagram_manage_messages` ✅
+5. Click en **"Generar token"**
+6. **Copia el token ahora** — empieza con `EAA...` — no se vuelve a mostrar
+
+7. Ve a Koyeb → `aure-backend` → **"Environment variables"**
+8. Actualiza: `META_ACCESS_TOKEN` = *(el token copiado)*
+
+### Paso 3.7 — Configurar Webhook
+
+1. En tu app Meta → menú izquierdo → **"Configuración"** → **"Básica"**
+2. Verifica que el modo en la parte superior diga **"Live"** — si dice "Development", cámbialo a **Live**
+3. Ve a **WhatsApp** → **"Configuración"**
+4. Sección **"Webhooks"** → click en **"Editar"**
+5. Rellena:
+   - **URL de devolución de llamada:** `https://aure-backend-tuusuario.koyeb.app/webhook`
+   - **Token de verificación:** `aure_webhook_secreto_2024`
 6. Click en **"Verificar y guardar"**
-   - Si aparece ✅ verde, funcionó
-   - Si falla, verifica que el backend esté corriendo y ngrok también
-7. En la sección de campos a suscribir, activa: **`messages`**
 
-#### Para Instagram:
-1. Menú izquierdo → **Instagram** → **Configuración**
-2. Mismo proceso: agrega el webhook con la misma URL y el mismo verify token
-3. Activa los campos: **`comments`**, **`messages`**
+> Si da error: verifica que el servicio en Koyeb esté corriendo (health check del Paso 2.5) y que `META_VERIFY_TOKEN` sea exactamente `aure_webhook_secreto_2024`.
 
----
+### Paso 3.8 — Suscribirse a mensajes
 
-### Paso 3.8 — Hacer la primera prueba
+1. En la sección **"Webhooks"**, busca el campo **`messages`**
+2. Click en **"Suscribirse"** ✅
+3. Click en **"Listo"**
 
-1. En Meta Developer Console → WhatsApp → **"Enviar y recibir mensajes"**
-2. Agrega tu número personal de WhatsApp como número de prueba (sigue las instrucciones que aparecen)
-3. Desde tu WhatsApp personal, envía un mensaje al número de prueba de Meta:
-   ```
-   Hola, ¿qué cadenas tienen disponibles?
-   ```
-4. En pocos segundos debes recibir la respuesta de Aure con los productos del catálogo
-
-Si responde correctamente: **el sistema está funcionando.**
+**Redeploy en Koyeb** para aplicar los nuevos tokens:
+- Koyeb → `aure-backend` → **"Redeploy"**
+- Espera el mensaje `[Server] Corriendo en http://localhost:3001`
 
 ---
 
-## Resumen rápido — comandos para arrancar cada día
+## FASE 4 — OpenAI API Key (5 min)
 
-Cada vez que quieras trabajar con el sistema, abre **4 terminales**:
+### Paso 4.1 — Crear la API Key
 
-```powershell
-# Terminal 1 — Backend (siempre primero)
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\backend"
-npm run dev
+1. Ve a **https://platform.openai.com**
+2. Crea una cuenta o inicia sesión
+3. Menú izquierdo → **"API keys"**
+4. Click en **"+ Create new secret key"**
+5. Nombre: `aure-production`
+6. Click en **"Create secret key"**
+7. **Copia la clave ahora** — empieza con `sk-...` — no se vuelve a mostrar
 
-# Terminal 2 — Frontend
-cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\frontend"
-npm run dev
+### Paso 4.2 — Agregar créditos (obligatorio)
 
-# Terminal 3 — ngrok (para que Meta pueda llegar al servidor)
-ngrok http 3001
+Sin saldo la API retorna error y el bot no responde.
 
-# Terminal 4 — libre para comandos varios
+1. Menú izquierdo → **"Billing"**
+2. **"Add payment method"** → agrega tu tarjeta
+3. **"Add to credit balance"** → agrega mínimo **$5 USD**
+
+### Paso 4.3 — Agregar a Koyeb
+
+1. Koyeb → `aure-backend` → **"Environment variables"**
+2. Actualiza: `OPENAI_API_KEY` = *(tu clave)*
+3. Koyeb hace redeploy automático al guardar
+
+---
+
+## FASE 5 — Frontend en Vercel (10 min)
+
+### Paso 5.1 — Crear cuenta en Vercel
+
+1. Ve a **https://vercel.com**
+2. Click en **"Sign Up"** → **"Continue with GitHub"**
+
+### Paso 5.2 — Importar el proyecto
+
+1. Dashboard de Vercel → **"Add New..."** → **"Project"**
+2. Selecciona el repositorio `aure-bot` → click en **"Import"**
+3. Configura el directorio raíz:
+   - Busca **"Root Directory"** → click en **"Edit"** → escribe `frontend` → **"Continue"**
+4. Vercel detecta Vite automáticamente:
+   - **Framework Preset:** `Vite` (auto)
+   - **Build Command:** `npm run build` (auto)
+   - **Output Directory:** `dist` (auto)
+
+### Paso 5.3 — Variable de entorno
+
+En la sección **"Environment Variables"** antes de hacer deploy:
+
+| Key | Value |
+|---|---|
+| `VITE_API_URL` | `https://aure-backend-tuusuario.koyeb.app` |
+
+### Paso 5.4 — Deploy
+
+1. Click en **"Deploy"**
+2. Build tarda ~1-2 minutos
+3. Obtienes tu URL: `https://aure-bot-tuusuario.vercel.app`
+
+### Paso 5.5 — Actualizar FRONTEND_URL en Koyeb
+
+1. Koyeb → `aure-backend` → **"Environment variables"**
+2. Agrega: `FRONTEND_URL` = `https://aure-bot-tuusuario.vercel.app`
+
+---
+
+## FASE 6 — Prueba Final (10 min)
+
+### Paso 6.1 — Lista de verificación de variables en Koyeb
+
+Confirma que las 12 variables estén completas (ninguna dice "pendiente"):
+
+| Variable | Debe contener |
+|---|---|
+| `NODE_ENV` | `production` |
+| `PORT` | `3001` |
+| `FRONTEND_URL` | `https://aure-bot-tuusuario.vercel.app` |
+| `DATABASE_URL` | `postgresql://...neon.tech/...` |
+| `META_VERIFY_TOKEN` | `aure_webhook_secreto_2024` |
+| `META_ACCESS_TOKEN` | `EAAxxxxx...` |
+| `WHATSAPP_PHONE_NUMBER_ID` | número de ~15 dígitos |
+| `OPENAI_API_KEY` | `sk-...` |
+| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `REDIS_HOST` | `xxx.upstash.io` |
+| `REDIS_PORT` | `6379` |
+| `REDIS_PASSWORD` | cadena larga |
+
+### Paso 6.2 — Health check
+
+```
+https://aure-backend-tuusuario.koyeb.app/health
+```
+Respuesta esperada: `{"status":"ok","timestamp":"..."}`
+
+### Paso 6.3 — Prueba real
+
+1. Abre WhatsApp en tu teléfono
+2. Escribe al número de Aure (o al número de prueba si usaste el Camino A)
+3. Envía: `Hola`
+4. Espera 5-10 segundos → el bot responde ✅
+
+### Paso 6.4 — Dashboard en vivo
+
+Abre `https://aure-bot-tuusuario.vercel.app` — la conversación aparece en tiempo real.
+
+---
+
+## SOLUCIÓN DE PROBLEMAS
+
+| Problema | Causa probable | Solución |
+|---|---|---|
+| `/health` no carga | Koyeb no deployó o hay error en código | Koyeb → tu app → pestaña **"Logbook"** → busca línea roja |
+| Webhook retorna 403 | `META_VERIFY_TOKEN` no coincide | Verifica que sea exactamente `aure_webhook_secreto_2024` sin espacios |
+| Bot no responde mensajes | `META_ACCESS_TOKEN` incorrecto | Regenera token en Meta Business → Usuarios del sistema |
+| Error de base de datos | `DATABASE_URL` mal copiada de Neon | Copia de nuevo desde Neon → tu proyecto → **"Connection string"** |
+| Error de Redis al arrancar | Credenciales de Upstash mal puestas | Verifica los 3 valores en Upstash → tu base → "Database Details" |
+| "insufficient_quota" en logs | Sin saldo en OpenAI | Agrega créditos en platform.openai.com → Billing |
+| App Meta en modo Development | No activaste modo Live | Meta Developer → tu app → toggle **Live** arriba a la derecha |
+| Webhook verificado pero no llegan mensajes | No suscrito al campo `messages` | Meta → WhatsApp → Configuración → Webhooks → Suscribirse a `messages` |
+
+### Ver logs en Koyeb
+
+Koyeb → tu app `aure-backend` → pestaña **"Logbook"**
+
+Logs normales de arranque exitoso:
+```
+[DB] Conexión exitosa a PostgreSQL
+[Server] Corriendo en http://localhost:3001
 ```
 
-> Redis arranca automáticamente con Windows, no necesitas tocarlo.
+---
 
-> Cada vez que ngrok cambie la URL, ve a Meta Developer Console y actualiza el webhook.
+## DESPUÉS DE QUE FUNCIONE — Cargar productos
+
+Edita `backend/src/seeders/products.js` con los productos reales de Aure, luego conéctate a la base de datos de Neon desde tu computadora:
+
+```powershell
+cd "C:\Users\Asus\Desktop\Anderson\Joyeria Aure\agente inteligente aure\backend"
+npm install
+$env:DATABASE_URL="postgresql://...neon.tech/..." # pega la connection string de Neon
+node src/seeders/products.js
+```
 
 ---
 
-## Problemas comunes y soluciones
+## COSTOS MENSUALES
 
-| Error | Causa | Solución |
-|---|---|---|
-| `ECONNREFUSED 5432` | PostgreSQL no está corriendo | Busca "Services" en Windows → iniciar el servicio PostgreSQL |
-| `ECONNREFUSED 6379` | Redis no está corriendo | Busca "Services" en Windows → iniciar el servicio Redis |
-| Webhook verification failed | URL de ngrok no coincide o verify token incorrecto | Verifica que el backend corra y que `META_VERIFY_TOKEN` sea idéntico en `.env` y en Meta |
-| Bot no responde | Token de Meta expiró | Generar nuevo token en Meta Developer Console → actualizar `META_ACCESS_TOKEN` en `.env` y reiniciar el backend |
-| `Insufficient quota` (OpenAI) | Sin saldo en OpenAI | Agregar saldo en platform.openai.com → Billing |
-| ngrok URL cambió | Reiniciaste ngrok | Actualizar la Callback URL en Meta Developer Console → WhatsApp → Webhooks |
+| Servicio | Costo |
+|---|---|
+| Koyeb (backend, siempre activo) | **$0** |
+| Neon (PostgreSQL, 500 MB) | **$0** |
+| Upstash (Redis, 10K cmd/día) | **$0** |
+| Vercel (frontend) | **$0** |
+| OpenAI GPT-4o-mini | ~$1-5/mes según volumen |
+| Meta WhatsApp API | $0 hasta 1.000 conv/mes |
+| **TOTAL** | **~$1-5/mes** |

@@ -4,6 +4,7 @@ const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379', 10),
   password: process.env.REDIS_PASSWORD || undefined,
+  ...(process.env.NODE_ENV === 'production' && { tls: {} }),
 };
 
 const followUpQueue = new Queue('aure:followUp', { connection: redisConnection });
