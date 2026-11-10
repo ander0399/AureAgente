@@ -7,7 +7,7 @@ const redisConnection = {
   ...(process.env.NODE_ENV === 'production' && { tls: {} }),
 };
 
-const followUpQueue = new Queue('aure:followUp', { connection: redisConnection });
+const followUpQueue = new Queue('aure-followUp', { connection: redisConnection });
 
 async function scheduleFollowUp({ userId, conversationId, jobType, delayMs, metadata }) {
   const jobId = `${jobType}:${userId}`;

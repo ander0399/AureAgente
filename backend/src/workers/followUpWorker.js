@@ -10,7 +10,7 @@ const redisConnection = {
 };
 
 const worker = new Worker(
-  'aure:followUp',
+  'aure-followUp',
   async (job) => {
     const { userId, conversationId, jobType, metadata } = job.data;
 
